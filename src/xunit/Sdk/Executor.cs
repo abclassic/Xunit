@@ -245,6 +245,11 @@ namespace Xunit.Sdk
                 ITypeInfo typeInfo = Reflector.Wrap(realType);
                 ITestClassCommand testClassCommand = TestClassCommandFactory.Make(typeInfo);
 
+                if (testClassCommand != null)
+                {
+                   typeInfo = testClassCommand.TypeUnderTest;
+                }
+               
                 List<IMethodInfo> methodInfos = new List<IMethodInfo>();
 
                 foreach (string method in methods)
