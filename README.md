@@ -4,6 +4,8 @@ This is a custom fork that fixes a probable bug in xUnit when a single test is r
 Thus when the executor enumerates all tests it checks if each method is in a list, but as these are not necessarily the same IMethodInfo instances, i.e. the list in particular contains an xUnit ReflectionMethodInfo which is never equal to any other IMethodInfo implementation.
 This means that the test won't run (or some fallback mechanisme is triggered bypassing RunWith etc.).
 
+Below follows the xUnit README.
+
 # About xUnit.net
 
 xUnit.net is a free, open source, community-focused unit testing tool for the .NET Framework. Written by the original inventor of NUnit, xUnit.net is the latest technology for unit testing C#, F#, VB.NET and other .NET languages. Works with ReSharper, CodeRush, and TestDriven.NET. xUnit.net is part of the [ASP.NET Open Source Gallery](http://www.outercurve.org/Galleries/ASPNETOpenSourceGallery) under the [Outercurve Foundation](http://www.outercurve.org/). It is licensed under the [Apache 2 license](http://opensource.org/licenses/Apache-2.0), which is approved by the OSI.
