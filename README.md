@@ -1,6 +1,6 @@
 # Custom xUnit fork.
 
-This is a custom fork that fixes a probably bug in xUnit when a single test is run, in this case there is no way wrap the ITypeInfo and thus the IMethodInfo of the method that is the test.
+This is a custom fork that fixes a probable bug in xUnit when a single test is run, in this case there is no way wrap the ITypeInfo and thus the IMethodInfo of the method that is the test.
 Thus when the executor enumerates all tests it checks if each method is in a list, but as these are not necessarily the same IMethodInfo instances, i.e. the list in particular contains an xUnit ReflectionMethodInfo which is never equal to any other IMethodInfo implementation.
 This means that the test won't run (or some fallback mechanisme is triggered bypassing RunWith etc.).
 
