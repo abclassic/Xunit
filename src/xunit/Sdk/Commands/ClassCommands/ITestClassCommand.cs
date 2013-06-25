@@ -53,7 +53,7 @@ namespace Xunit.Sdk
         /// </summary>
         /// <returns>The test methods</returns>
         IEnumerable<IMethodInfo> EnumerateTestMethods();
-
+        
         /// <summary>
         /// Determines if a given <see cref="IMethodInfo"/> refers to a test method.
         /// </summary>
