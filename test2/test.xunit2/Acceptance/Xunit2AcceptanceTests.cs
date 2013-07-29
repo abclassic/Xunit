@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using Xunit;
 using Xunit.Abstractions;
 using Xunit.Sdk;
@@ -36,7 +37,8 @@ public class Xunit2AcceptanceTests
                 message =>
                 {
                     var collectionStarting = Assert.IsAssignableFrom<ITestCollectionStarting>(message);
-                    // TODO: How do we represent collections?
+                    Assert.NotNull(collectionStarting.TestCollection);
+                    // TODO: There will need to be more tests here eventually...
                 },
                 message =>
                 {
@@ -73,6 +75,7 @@ public class Xunit2AcceptanceTests
                 {
                     var testPassed = Assert.IsAssignableFrom<ITestPassed>(message);
                     Assert.Equal(testPassed.TestCase.DisplayName, testPassed.TestDisplayName);
+                    Assert.NotEqual(0M, testPassed.ExecutionTime);
                 },
                 message =>
                 {
@@ -85,6 +88,7 @@ public class Xunit2AcceptanceTests
                     Assert.Equal(1, testCaseFinished.TestsRun);
                     Assert.Equal(0, testCaseFinished.TestsFailed);
                     Assert.Equal(0, testCaseFinished.TestsSkipped);
+                    Assert.NotEqual(0M, testCaseFinished.ExecutionTime);
                 },
                 message =>
                 {
@@ -98,21 +102,25 @@ public class Xunit2AcceptanceTests
                     Assert.Equal(1, classFinished.TestsRun);
                     Assert.Equal(0, classFinished.TestsFailed);
                     Assert.Equal(0, classFinished.TestsSkipped);
+                    Assert.NotEqual(0M, classFinished.ExecutionTime);
                 },
                 message =>
                 {
                     var collectionFinished = Assert.IsAssignableFrom<ITestCollectionFinished>(message);
+                    Assert.NotNull(collectionFinished.TestCollection);
                     Assert.Equal(1, collectionFinished.TestsRun);
                     Assert.Equal(0, collectionFinished.TestsFailed);
                     Assert.Equal(0, collectionFinished.TestsSkipped);
-                    // TODO: How do we represent collections?
+                    Assert.NotEqual(0M, collectionFinished.ExecutionTime);
+                    // TODO: There will need to be more tests here eventually...
                 },
                 message =>
                 {
-                    var finished = Assert.IsAssignableFrom<ITestAssemblyFinished>(message);
-                    Assert.Equal(1, finished.TestsRun);
-                    Assert.Equal(0, finished.TestsFailed);
-                    Assert.Equal(0, finished.TestsSkipped);
+                    var assemblyFinished = Assert.IsAssignableFrom<ITestAssemblyFinished>(message);
+                    Assert.Equal(1, assemblyFinished.TestsRun);
+                    Assert.Equal(0, assemblyFinished.TestsFailed);
+                    Assert.Equal(0, assemblyFinished.TestsSkipped);
+                    Assert.NotEqual(0M, assemblyFinished.ExecutionTime);
                 }
             );
         }
@@ -123,11 +131,17 @@ public class Xunit2AcceptanceTests
         [Fact]
         public void SingleSkippedTest()
         {
-            List<ITestSkipped> results = Run<ITestSkipped>(typeof(SingleSkippedTestClass));
+            List<ITestMessage> results = Run(typeof(SingleSkippedTestClass));
 
-            var skippedMessage = Assert.Single(results);
+            var skippedMessage = Assert.Single(results.OfType<ITestSkipped>());
             Assert.Equal("Xunit2AcceptanceTests+SingleSkippedTestClass.TestMethod", skippedMessage.TestDisplayName);
             Assert.Equal("This is a skipped test", skippedMessage.Reason);
+
+            var classFinishedMessage = Assert.Single(results.OfType<ITestClassFinished>());
+            Assert.Equal(1, classFinishedMessage.TestsSkipped);
+
+            var collectionFinishedMessage = Assert.Single(results.OfType<ITestCollectionFinished>());
+            Assert.Equal(1, collectionFinishedMessage.TestsSkipped);
         }
     }
 
@@ -136,10 +150,16 @@ public class Xunit2AcceptanceTests
         [Fact]
         public void SingleFailingTest()
         {
-            List<ITestFailed> results = Run<ITestFailed>(typeof(SingleFailingTestClass));
+            List<ITestMessage> results = Run(typeof(SingleFailingTestClass));
 
-            var failedMessage = Assert.Single(results);
+            var failedMessage = Assert.Single(results.OfType<ITestFailed>());
             Assert.Equal(typeof(TrueException).FullName, failedMessage.ExceptionType);
+
+            var classFinishedMessage = Assert.Single(results.OfType<ITestClassFinished>());
+            Assert.Equal(1, classFinishedMessage.TestsFailed);
+
+            var collectionFinishedMessage = Assert.Single(results.OfType<ITestCollectionFinished>());
+            Assert.Equal(1, collectionFinishedMessage.TestsFailed);
         }
     }
 
@@ -297,6 +317,56 @@ public class Xunit2AcceptanceTests
 
             Assert.Collection(results,
                 message => Assert.IsAssignableFrom<ITestAssemblyStarting>(message),
+                message => Assert.IsAssignableFrom<ITestAssemblyFinished>(message)
+            );
+        }
+
+        [Fact]
+        public void CancelDuringITestAssemblyFinished()
+        {
+            List<ITestMessage> results = Run(typeof(PassingClassUnderTest), msg => !(msg is ITestAssemblyFinished));
+
+            Assert.Collection(results,
+                message => Assert.IsAssignableFrom<ITestAssemblyStarting>(message),
+                message => Assert.IsAssignableFrom<ITestCollectionStarting>(message),
+                message => Assert.IsAssignableFrom<ITestClassStarting>(message),
+
+                // TestMethod1
+                message => Assert.IsAssignableFrom<ITestMethodStarting>(message),
+                message => Assert.IsAssignableFrom<ITestCaseStarting>(message),
+                message => Assert.IsAssignableFrom<ITestStarting>(message),
+                message => Assert.IsAssignableFrom<ITestClassConstructionStarting>(message),
+                message => Assert.IsAssignableFrom<ITestClassConstructionFinished>(message),
+                message => Assert.IsAssignableFrom<IBeforeTestStarting>(message),
+                message => Assert.IsAssignableFrom<IBeforeTestFinished>(message),
+                message => Assert.IsAssignableFrom<IAfterTestStarting>(message),
+                message => Assert.IsAssignableFrom<IAfterTestFinished>(message),
+                message => Assert.IsAssignableFrom<ITestClassDisposeStarting>(message),
+                message => Assert.IsAssignableFrom<ITestClassDisposeFinished>(message),
+                message => Assert.IsAssignableFrom<ITestPassed>(message),
+                message => Assert.IsAssignableFrom<ITestFinished>(message),
+                message => Assert.IsAssignableFrom<ITestCaseFinished>(message),
+                message => Assert.IsAssignableFrom<ITestMethodFinished>(message),
+
+                // TestMethod2
+                message => Assert.IsAssignableFrom<ITestMethodStarting>(message),
+                message => Assert.IsAssignableFrom<ITestCaseStarting>(message),
+                message => Assert.IsAssignableFrom<ITestStarting>(message),
+                message => Assert.IsAssignableFrom<ITestClassConstructionStarting>(message),
+                message => Assert.IsAssignableFrom<ITestClassConstructionFinished>(message),
+                message => Assert.IsAssignableFrom<IBeforeTestStarting>(message),
+                message => Assert.IsAssignableFrom<IBeforeTestFinished>(message),
+                message => Assert.IsAssignableFrom<IAfterTestStarting>(message),
+                message => Assert.IsAssignableFrom<IAfterTestFinished>(message),
+                message => Assert.IsAssignableFrom<ITestClassDisposeStarting>(message),
+                message => Assert.IsAssignableFrom<ITestClassDisposeFinished>(message),
+                message => Assert.IsAssignableFrom<ITestPassed>(message),
+                message => Assert.IsAssignableFrom<ITestFinished>(message),
+                message => Assert.IsAssignableFrom<ITestCaseFinished>(message),
+                message => Assert.IsAssignableFrom<ITestMethodFinished>(message),
+
+                message => Assert.IsAssignableFrom<ITestClassFinished>(message),
+                message => Assert.IsAssignableFrom<ITestCollectionFinished>(message),
                 message => Assert.IsAssignableFrom<ITestAssemblyFinished>(message)
             );
         }
@@ -909,6 +979,55 @@ public class Xunit2AcceptanceTests
             public void TheTest()
             {
                 Assert.Equal(2, 3);
+            }
+        }
+    }
+
+    public class StaticClassSupport : AcceptanceTest
+    {
+        [Fact]
+        public void TestsCanBeInStaticClasses()
+        {
+            var testMessages = Run<ITestResultMessage>(typeof(StaticClassUnderTest));
+
+            var testMessage = Assert.Single(testMessages);
+            Assert.Equal("Xunit2AcceptanceTests+StaticClassSupport+StaticClassUnderTest.Passing", testMessage.TestDisplayName);
+            Assert.IsAssignableFrom<ITestPassed>(testMessage);
+        }
+
+        static class StaticClassUnderTest
+        {
+            [Fact]
+            public static void Passing() { }
+        }
+    }
+
+    public class ErrorAggregation : AcceptanceTest
+    {
+        [Fact]
+        public void EachTestMethodHasIndividualExceptionMessage()
+        {
+            var testMessages = Run<ITestFailed>(typeof(ClassUnderTest));
+
+            var equalFailure = Assert.Single(testMessages, msg => msg.TestDisplayName == "Xunit2AcceptanceTests+ErrorAggregation+ClassUnderTest.EqualFailure");
+            Assert.Contains("Assert.Equal() Failure", equalFailure.Message);
+
+            var notNullFailure = Assert.Single(testMessages, msg => msg.TestDisplayName == "Xunit2AcceptanceTests+ErrorAggregation+ClassUnderTest.NotNullFailure");
+            Assert.Contains("Assert.NotNull() Failure", notNullFailure.Message);
+        }
+
+        class ClassUnderTest
+        {
+            [Fact]
+            public void EqualFailure()
+            {
+                Assert.Equal(42, 40);
+            }
+
+            [Fact]
+            public void NotNullFailure()
+            {
+                Assert.NotNull(null);
             }
         }
     }

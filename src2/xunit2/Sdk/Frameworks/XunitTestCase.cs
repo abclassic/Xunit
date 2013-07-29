@@ -21,25 +21,25 @@ namespace Xunit.Sdk
     [Serializable]
     public class XunitTestCase : LongLivedMarshalByRefObject, ITestCase, ISerializable
     {
-        readonly static HashAlgorithm hasher = new SHA1Managed();
-
         readonly static object[] EmptyArray = new object[0];
         readonly static MethodInfo EnumerableCast = typeof(Enumerable).GetMethod("Cast");
         readonly static MethodInfo EnumerableToArray = typeof(Enumerable).GetMethod("ToArray");
+        readonly static HashAlgorithm Hasher = new SHA1Managed();
 
         Lazy<string> uniqueID;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="XunitTestCase"/> class.
         /// </summary>
+        /// <param name="testCollection">The test collection this test case belongs to.</param>
         /// <param name="assembly">The test assembly.</param>
         /// <param name="type">The test class.</param>
         /// <param name="method">The test method.</param>
         /// <param name="factAttribute">The instance of the <see cref="FactAttribute"/>.</param>
         /// <param name="arguments">The arguments for the test method.</param>
-        public XunitTestCase(IAssemblyInfo assembly, ITypeInfo type, IMethodInfo method, IAttributeInfo factAttribute, object[] arguments = null)
+        public XunitTestCase(ITestCollection testCollection, IAssemblyInfo assembly, ITypeInfo type, IMethodInfo method, IAttributeInfo factAttribute, object[] arguments = null)
         {
-            Initialize(assembly, type, method, factAttribute, arguments);
+            Initialize(testCollection, assembly, type, method, factAttribute, arguments);
         }
 
         /// <inheritdoc/>
@@ -49,16 +49,17 @@ namespace Xunit.Sdk
             string typeName = info.GetString("TypeName");
             string methodName = info.GetString("MethodName");
             object[] arguments = (object[])info.GetValue("Arguments", typeof(object[]));
+            var testCollection = (ITestCollection)info.GetValue("TestCollection", typeof(ITestCollection));
 
             var type = Reflector.GetType(typeName, assemblyName);
             var typeInfo = Reflector.Wrap(type);
             var methodInfo = Reflector.Wrap(type.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static));
             var factAttribute = methodInfo.GetCustomAttributes(typeof(FactAttribute)).Single();
 
-            Initialize(Reflector.Wrap(type.Assembly), typeInfo, methodInfo, factAttribute, arguments);
+            Initialize(testCollection, Reflector.Wrap(type.Assembly), typeInfo, methodInfo, factAttribute, arguments);
         }
 
-        void Initialize(IAssemblyInfo assembly, ITypeInfo type, IMethodInfo method, IAttributeInfo factAttribute, object[] arguments)
+        void Initialize(ITestCollection testCollection, IAssemblyInfo assembly, ITypeInfo type, IMethodInfo method, IAttributeInfo factAttribute, object[] arguments)
         {
             string displayNameBase = factAttribute.GetNamedArgument<string>("DisplayName") ?? type.Name + "." + method.Name;
 
@@ -69,6 +70,7 @@ namespace Xunit.Sdk
             DisplayName = GetDisplayNameWithArguments(displayNameBase, arguments);
             SkipReason = factAttribute.GetNamedArgument<string>("Skip");
             Traits = new Dictionary<string, string>();
+            TestCollection = testCollection;
 
             foreach (IAttributeInfo traitAttribute in Method.GetCustomAttributes(typeof(TraitAttribute)))
             {
@@ -100,10 +102,7 @@ namespace Xunit.Sdk
         public string SkipReason { get; private set; }
 
         /// <inheritdoc/>
-        public int? SourceFileLine { get; internal set; }
-
-        /// <inheritdoc/>
-        public string SourceFileName { get; internal set; }
+        public SourceInformation SourceInformation { get; internal set; }
 
         /// <inheritdoc/>
         public ITestCollection TestCollection { get; private set; }
@@ -137,23 +136,6 @@ namespace Xunit.Sdk
                 }
 
             return args;
-        }
-
-        static string ConvertToSimpleTypeName(Type type)
-        {
-            if (!type.IsGenericType)
-                return type.Name;
-
-            Type[] genericTypes = type.GetGenericArguments();
-            string[] simpleNames = new string[genericTypes.Length];
-
-            for (int idx = 0; idx < genericTypes.Length; idx++)
-                simpleNames[idx] = ConvertToSimpleTypeName(genericTypes[idx]);
-
-            string baseTypeName = type.Name;
-            int backTickIdx = type.Name.IndexOf('`');
-
-            return baseTypeName.Substring(0, backTickIdx) + "<" + String.Join(", ", simpleNames) + ">";
         }
 
         /// <summary>
@@ -201,6 +183,7 @@ namespace Xunit.Sdk
             info.AddValue("TypeName", Class.Name);
             info.AddValue("MethodName", Method.Name);
             info.AddValue("Arguments", Arguments);
+            info.AddValue("TestCollection", TestCollection);
         }
 
         static string GetParameterName(IParameterInfo[] parameters, int index)
@@ -245,7 +228,7 @@ namespace Xunit.Sdk
                     Write(stream, SerializationHelper.Serialize(Arguments));
 
                 stream.Position = 0;
-                byte[] hash = hasher.ComputeHash(stream);
+                byte[] hash = Hasher.ComputeHash(stream);
                 return String.Join("", hash.Select(x => x.ToString("x2")).ToArray());
             }
         }
@@ -378,7 +361,7 @@ namespace Xunit.Sdk
         /// <param name="testMethodArguments">The arguments to pass to the test method.</param>
         /// <param name="displayName">The display name for the test.</param>
         /// <param name="beforeAfterAttributes">The <see cref="BeforeAfterTestAttribute"/> instances attached to the test.</param>
-        /// <param name="aggregator">The error aggregator to use for catching exception.</param>
+        /// <param name="parentAggregator">The parent aggregator that contains the exceptions up to this point.</param>
         /// <param name="executionTime">The time spent executing the tests.</param>
         protected bool RunTestWithArguments(IMessageSink messageSink,
                                             Type classUnderTest,
@@ -387,10 +370,11 @@ namespace Xunit.Sdk
                                             object[] testMethodArguments,
                                             string displayName,
                                             List<BeforeAfterTestAttribute> beforeAfterAttributes,
-                                            ExceptionAggregator aggregator,
+                                            ExceptionAggregator parentAggregator,
                                             ref decimal executionTime)
         {
             bool cancelled = false;
+            var aggregator = new ExceptionAggregator(parentAggregator);
 
             if (!messageSink.OnMessage(new TestStarting { TestCase = this, TestDisplayName = displayName }))
                 cancelled = true;

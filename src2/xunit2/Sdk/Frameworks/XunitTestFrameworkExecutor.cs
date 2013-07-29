@@ -13,7 +13,8 @@ namespace Xunit.Sdk
     /// </summary>
     public class XunitTestFrameworkExecutor : LongLivedMarshalByRefObject, ITestFrameworkExecutor
     {
-        IAssemblyInfo assemblyInfo;
+        readonly string assemblyFileName;
+        readonly IAssemblyInfo assemblyInfo;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="XunitTestFrameworkExecutor"/> class.
@@ -21,6 +22,8 @@ namespace Xunit.Sdk
         /// <param name="assemblyFileName">Path of the test assembly.</param>
         public XunitTestFrameworkExecutor(string assemblyFileName)
         {
+            this.assemblyFileName = assemblyFileName;
+
             var assembly = Assembly.Load(AssemblyName.GetAssemblyName(assemblyFileName));
             assemblyInfo = Reflector.Wrap(assembly);
         }
@@ -46,17 +49,22 @@ namespace Xunit.Sdk
             {
                 Directory.SetCurrentDirectory(Path.GetDirectoryName(assemblyInfo.AssemblyPath));
 
-                if (messageSink.OnMessage(new TestAssemblyStarting()))
+                if (messageSink.OnMessage(new TestAssemblyStarting
+                    {
+                        AssemblyFileName = assemblyFileName,
+                        ConfigFileName = AppDomain.CurrentDomain.SetupInformation.ConfigurationFile,
+                        StartTime = DateTime.Now,
+                        TestEnvironment = String.Format("{0}-bit .NET {1}", IntPtr.Size * 8, Environment.Version),
+                        TestFrameworkDisplayName = XunitTestFrameworkDiscoverer.DisplayName
+                    }))
                 {
-                    var classGroups = testMethods.Cast<XunitTestCase>().GroupBy(tc => tc.Class).ToList();
-
-                    if (classGroups.Count > 0)
+                    foreach (var collectionGroup in testMethods.Cast<XunitTestCase>().GroupBy(tc => tc.TestCollection))
                     {
                         var collectionSummary = new RunSummary();
 
-                        if (messageSink.OnMessage(new TestCollectionStarting()))
+                        if (messageSink.OnMessage(new TestCollectionStarting { TestCollection = collectionGroup.Key }))
                         {
-                            foreach (var group in classGroups)
+                            foreach (var group in collectionGroup.GroupBy(tc => tc.Class))
                             {
                                 var classSummary = new RunSummary();
 
@@ -68,7 +76,15 @@ namespace Xunit.Sdk
                                     collectionSummary.Aggregate(classSummary);
                                 }
 
-                                if (!messageSink.OnMessage(new TestClassFinished { Assembly = assemblyInfo, ClassName = group.Key.Name, TestsRun = classSummary.Total }))
+                                if (!messageSink.OnMessage(new TestClassFinished
+                                {
+                                    Assembly = assemblyInfo,
+                                    ClassName = group.Key.Name,
+                                    ExecutionTime = classSummary.Time,
+                                    TestsFailed = classSummary.Failed,
+                                    TestsRun = classSummary.Total,
+                                    TestsSkipped = classSummary.Skipped
+                                }))
                                     cancelled = true;
 
                                 if (cancelled)
@@ -76,7 +92,16 @@ namespace Xunit.Sdk
                             }
                         }
 
-                        messageSink.OnMessage(new TestCollectionFinished { Assembly = assemblyInfo, TestsRun = collectionSummary.Total });
+                        messageSink.OnMessage(new TestCollectionFinished
+                        {
+                            Assembly = assemblyInfo,
+                            ExecutionTime = collectionSummary.Time,
+                            TestCollection = collectionGroup.Key,
+                            TestsFailed = collectionSummary.Failed,
+                            TestsRun = collectionSummary.Total,
+                            TestsSkipped = collectionSummary.Skipped
+                        });
+
                         totalSummary.Aggregate(collectionSummary);
                     }
                 }
@@ -84,10 +109,10 @@ namespace Xunit.Sdk
                 messageSink.OnMessage(new TestAssemblyFinished
                 {
                     Assembly = assemblyInfo,
+                    ExecutionTime = totalSummary.Time,
                     TestsRun = totalSummary.Total,
                     TestsFailed = totalSummary.Failed,
-                    TestsSkipped = totalSummary.Skipped,
-                    ExecutionTime = totalSummary.Time
+                    TestsSkipped = totalSummary.Skipped
                 });
             }
             finally
@@ -114,28 +139,32 @@ namespace Xunit.Sdk
                 fixtureMappings.Add(fixtureType, fixture);
             }
 
-            var ctors = testClassType.GetConstructors();
-            if (ctors.Length != 1)
+            var isStaticClass = testClassType.IsAbstract && testClassType.IsSealed;
+            if (!isStaticClass)
             {
-                aggregator.Add(new TestClassException("A test class may only define a single public constructor."));
-            }
-            else
-            {
-                var ctor = ctors.Single();
-                List<string> unusedArguments = new List<string>();
-
-                foreach (var paramInfo in ctor.GetParameters())
+                var ctors = testClassType.GetConstructors();
+                if (ctors.Length != 1)
                 {
-                    object fixture;
-
-                    if (fixtureMappings.TryGetValue(paramInfo.ParameterType, out fixture))
-                        constructorArguments.Add(fixture);
-                    else
-                        unusedArguments.Add(paramInfo.ParameterType.Name + " " + paramInfo.Name);
+                    aggregator.Add(new TestClassException("A test class may only define a single public constructor."));
                 }
+                else
+                {
+                    var ctor = ctors.Single();
+                    List<string> unusedArguments = new List<string>();
 
-                if (unusedArguments.Count > 0)
-                    aggregator.Add(new TestClassException("The following constructor arguments did not have matching fixture data: " + String.Join(", ", unusedArguments)));
+                    foreach (var paramInfo in ctor.GetParameters())
+                    {
+                        object fixture;
+
+                        if (fixtureMappings.TryGetValue(paramInfo.ParameterType, out fixture))
+                            constructorArguments.Add(fixture);
+                        else
+                            unusedArguments.Add(paramInfo.ParameterType.Name + " " + paramInfo.Name);
+                    }
+
+                    if (unusedArguments.Count > 0)
+                        aggregator.Add(new TestClassException("The following constructor arguments did not have matching fixture data: " + String.Join(", ", unusedArguments)));
+                }
             }
 
             var methodGroups = group.GroupBy(tc => tc.Method);
@@ -197,6 +226,7 @@ namespace Xunit.Sdk
 
             return cancelled;
         }
+
         class RunSummary
         {
             public int Total = 0;

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Xml.Linq;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 using Xunit.Abstractions;
@@ -10,8 +11,8 @@ namespace Xunit.Runner.MSBuild
     {
         string assemblyFileName;
 
-        public TeamCityVisitor(TaskLoggingHelper log, Func<bool> cancelThunk, string assemblyFileName)
-            : base(log, cancelThunk)
+        public TeamCityVisitor(TaskLoggingHelper log, XElement assembliesElement, Func<bool> cancelThunk, string assemblyFileName)
+            : base(log, assembliesElement, cancelThunk)
         {
             this.assemblyFileName = Path.GetFullPath(assemblyFileName);
 
@@ -33,18 +34,19 @@ namespace Xunit.Runner.MSBuild
             Log.LogError("{0}: {1}", error.ExceptionType, Escape(error.Message));
             Log.LogError(error.StackTrace);
 
-            return !CancelThunk();
+            return base.Visit(error);
         }
 
         protected override bool Visit(ITestAssemblyFinished assemblyFinished)
         {
-            base.Visit(assemblyFinished);
+            // Base class does computation of results, so call it first.
+            var result = base.Visit(assemblyFinished);
 
             Log.LogMessage(MessageImportance.High, "##teamcity[testSuiteFinished name='{0}' flowId='{1}']",
                            TeamCityEscape(assemblyFileName),
                            FlowId);
 
-            return !CancelThunk();
+            return result;
         }
 
         protected override bool Visit(ITestAssemblyStarting assemblyStarting)
@@ -53,7 +55,7 @@ namespace Xunit.Runner.MSBuild
                            TeamCityEscape(assemblyFileName),
                            FlowId);
 
-            return !CancelThunk();
+            return base.Visit(assemblyStarting);
         }
 
         protected override bool Visit(ITestFailed testFailed)
@@ -65,14 +67,14 @@ namespace Xunit.Runner.MSBuild
                            FlowId);
             LogFinish(testFailed);
 
-            return !CancelThunk();
+            return base.Visit(testFailed);
         }
 
         protected override bool Visit(ITestPassed testPassed)
         {
             LogFinish(testPassed);
 
-            return !CancelThunk();
+            return base.Visit(testPassed);
         }
 
         protected override bool Visit(ITestSkipped testSkipped)
@@ -83,7 +85,7 @@ namespace Xunit.Runner.MSBuild
                            FlowId);
             LogFinish(testSkipped);
 
-            return !CancelThunk();
+            return base.Visit(testSkipped);
         }
 
         protected override bool Visit(ITestStarting testStarting)
@@ -92,7 +94,7 @@ namespace Xunit.Runner.MSBuild
                            TeamCityEscape(testStarting.TestDisplayName),
                            FlowId);
 
-            return !CancelThunk();
+            return base.Visit(testStarting);
         }
 
         static string TeamCityEscape(string value)

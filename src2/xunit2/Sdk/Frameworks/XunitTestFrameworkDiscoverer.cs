@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -12,21 +13,61 @@ namespace Xunit.Sdk
     /// </summary>
     public class XunitTestFrameworkDiscoverer : LongLivedMarshalByRefObject, ITestFrameworkDiscoverer
     {
-        IAssemblyInfo assemblyInfo;
-        ISourceInformationProvider sourceProvider;
+        /// <summary>
+        /// Gets the display name of the xUnit.net v2 test framework.
+        /// </summary>
+        public static readonly string DisplayName = String.Format(CultureInfo.InvariantCulture, "xUnit.net {0}", typeof(XunitTestFrameworkDiscoverer).Assembly.GetName().Version);
+
+        readonly IAssemblyInfo assemblyInfo;
+        readonly ISourceInformationProvider sourceProvider;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="XunitTestFrameworkDiscoverer"/> class.
         /// </summary>
         /// <param name="assemblyInfo">The test assembly.</param>
         /// <param name="sourceProvider">The source information provider.</param>
-        public XunitTestFrameworkDiscoverer(IAssemblyInfo assemblyInfo, ISourceInformationProvider sourceProvider = null)
+        public XunitTestFrameworkDiscoverer(IAssemblyInfo assemblyInfo, ISourceInformationProvider sourceProvider)
         {
             Guard.ArgumentNotNull("assemblyInfo", assemblyInfo);
+            Guard.ArgumentNotNull("sourceProvider", sourceProvider);
 
             this.assemblyInfo = assemblyInfo;
-            this.sourceProvider = sourceProvider ?? new VisualStudioSourceInformationProvider();
+            this.sourceProvider = sourceProvider;
+
+            // Determine the collection behavior, and tack it onto the end of the display name
+            var collectionBehavior = assemblyInfo.GetCustomAttributes(typeof(CollectionBehaviorAttribute)).SingleOrDefault();
+            var factoryType = GetTestCollectionFactoryType(collectionBehavior);
+
+            TestCollectionFactory = (IXunitTestCollectionFactory)Activator.CreateInstance(factoryType, new[] { assemblyInfo });
+            TestFrameworkDisplayName = String.Format("{0} [{1}, non-parallel]", DisplayName, TestCollectionFactory.DisplayName);
         }
+
+        private Type GetTestCollectionFactoryType(IAttributeInfo collectionBehavior)
+        {
+            if (collectionBehavior == null)
+                return typeof(CollectionPerClassTestCollectionFactory);
+
+            var ctorArgs = collectionBehavior.GetConstructorArguments().ToList();
+            if (ctorArgs.Count == 0)
+                return typeof(CollectionPerClassTestCollectionFactory);
+
+            if (ctorArgs.Count == 1 && (CollectionBehavior)ctorArgs[0] == CollectionBehavior.CollectionPerAssembly)
+                return typeof(CollectionPerAssemblyTestCollectionFactory);
+
+            var result = Reflector.GetType((string)ctorArgs[0], (string)ctorArgs[1]);
+            if (!typeof(IXunitTestCollectionFactory).IsAssignableFrom(result) || result.GetConstructor(new[] { typeof(IAssemblyInfo) }) == null)
+                return typeof(CollectionPerClassTestCollectionFactory);
+
+            return result;
+        }
+
+        /// <summary>
+        /// Gets the test collection factory that makes test collections.
+        /// </summary>
+        public IXunitTestCollectionFactory TestCollectionFactory { get; private set; }
+
+        /// <inheritdoc/>
+        public string TestFrameworkDisplayName { get; private set; }
 
         /// <inheritdoc/>
         public void Dispose() { }
@@ -72,6 +113,7 @@ namespace Xunit.Sdk
         protected virtual bool FindImpl(ITypeInfo type, bool includeSourceInformation, IMessageSink messageSink)
         {
             string currentDirectory = Directory.GetCurrentDirectory();
+            var testCollection = TestCollectionFactory.Get(type);
 
             try
             {
@@ -92,7 +134,7 @@ namespace Xunit.Sdk
                             {
                                 IXunitDiscoverer discoverer = (IXunitDiscoverer)Activator.CreateInstance(discovererType);
 
-                                foreach (XunitTestCase testCase in discoverer.Discover(assemblyInfo, type, method, factAttribute))
+                                foreach (XunitTestCase testCase in discoverer.Discover(testCollection, assemblyInfo, type, method, factAttribute))
                                     if (!messageSink.OnMessage(new TestCaseDiscoveryMessage { TestCase = UpdateTestCaseWithSourceInfo(testCase, includeSourceInformation) }))
                                         return false;
                             }
@@ -119,29 +161,10 @@ namespace Xunit.Sdk
 
         private ITestCase UpdateTestCaseWithSourceInfo(XunitTestCase testCase, bool includeSourceInformation)
         {
-            if (includeSourceInformation)
-            {
-                Tuple<string, int?> sourceInfo = sourceProvider.GetSourceInformation(testCase);
-                testCase.SourceFileName = sourceInfo.Item1;
-                testCase.SourceFileLine = sourceInfo.Item2;
-            }
+            if (includeSourceInformation && sourceProvider != null)
+                testCase.SourceInformation = sourceProvider.GetSourceInformation(testCase);
 
             return testCase;
-        }
-
-        class VisualStudioSourceInformationProvider : ISourceInformationProvider
-        {
-            public Tuple<string, int?> GetSourceInformation(ITestCase testCase)
-            {
-                return Tuple.Create<string, int?>(null, null);
-
-                // TODO: Load DiaSession dynamically, since it's only available when running inside of Visual Studio.
-                //       Or look at the CCI2 stuff from the Rx framework: https://github.com/Reactive-Extensions/IL2JS/tree/master/CCI2/PdbReader
-
-                //IMethodTestCase methodTestCase = testCase as IMethodTestCase;
-                //if (methodTestCase == null)
-                //    return Tuple.Create<string, int?>(null, null);
-            }
         }
     }
 }

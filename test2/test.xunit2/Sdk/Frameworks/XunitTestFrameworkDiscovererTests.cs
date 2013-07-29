@@ -13,7 +13,93 @@ public class XunitTestFrameworkDiscovererTests
         [Fact]
         public void GuardClause()
         {
-            Assert.Throws<ArgumentNullException>(() => new XunitTestFrameworkDiscoverer(assemblyInfo: null), "assemblyInfo");
+            Assert.Throws<ArgumentNullException>(() => new XunitTestFrameworkDiscoverer(null, Substitute.For<ISourceInformationProvider>()), "assemblyInfo");
+            Assert.Throws<ArgumentNullException>(() => new XunitTestFrameworkDiscoverer(Substitute.For<IAssemblyInfo>(), null), "sourceProvider");
+        }
+
+        [Fact]
+        public void DefaultTestCollectionFactoryIsCollectionPerClass()
+        {
+            var assembly = Mocks.AssemblyInfo();
+            var sourceInfoProvider = Substitute.For<ISourceInformationProvider>();
+
+            var discoverer = new XunitTestFrameworkDiscoverer(assembly, sourceInfoProvider);
+
+            Assert.IsType<CollectionPerClassTestCollectionFactory>(discoverer.TestCollectionFactory);
+            Assert.Equal(XunitTestFrameworkDiscoverer.DisplayName + " [collection-per-class, non-parallel]", discoverer.TestFrameworkDisplayName);
+        }
+
+        [Fact]
+        public void UserCanChooseFromBuiltInCollectionFactories()
+        {
+            var attr = Mocks.CollectionBehaviorAttribute(CollectionBehavior.CollectionPerAssembly);
+            var assembly = Mocks.AssemblyInfo(attributes: new[] { attr });
+            var sourceInfoProvider = Substitute.For<ISourceInformationProvider>();
+
+            var discoverer = new XunitTestFrameworkDiscoverer(assembly, sourceInfoProvider);
+
+            Assert.IsType<CollectionPerAssemblyTestCollectionFactory>(discoverer.TestCollectionFactory);
+            Assert.Equal(XunitTestFrameworkDiscoverer.DisplayName + " [collection-per-assembly, non-parallel]", discoverer.TestFrameworkDisplayName);
+        }
+
+        [Fact]
+        public void UserCanChooseCustomCollectionFactory()
+        {
+            var factoryType = typeof(MyTestCollectionFactory);
+            var attr = Mocks.CollectionBehaviorAttribute(factoryType.FullName, factoryType.Assembly.FullName);
+            var assembly = Mocks.AssemblyInfo(attributes: new[] { attr });
+            var sourceInfoProvider = Substitute.For<ISourceInformationProvider>();
+
+            var discoverer = new XunitTestFrameworkDiscoverer(assembly, sourceInfoProvider);
+
+            Assert.IsType<MyTestCollectionFactory>(discoverer.TestCollectionFactory);
+            Assert.Equal(XunitTestFrameworkDiscoverer.DisplayName + " [My Factory, non-parallel]", discoverer.TestFrameworkDisplayName);
+        }
+
+        class MyTestCollectionFactory : IXunitTestCollectionFactory
+        {
+            public string DisplayName { get { return "My Factory"; } }
+
+            public MyTestCollectionFactory(IAssemblyInfo assembly) { }
+
+            public ITestCollection Get(ITypeInfo testClass)
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        [Theory]
+        [InlineData("XunitTestFrameworkDiscovererTests+Construction+TestCollectionFactory_NoCompatibleConstructor")]
+        [InlineData("XunitTestFrameworkDiscovererTests+Construction+TestCollectionFactory_DoesNotImplementInterface")]
+        [InlineData("ThisIsNotARealType")]
+        public void IncompatibleOrInvalidTypesGetDefaultBehavior(string factoryTypeName)
+        {
+            var attr = Mocks.CollectionBehaviorAttribute(factoryTypeName, "test.xunit2");
+            var assembly = Mocks.AssemblyInfo(attributes: new[] { attr });
+            var sourceInfoProvider = Substitute.For<ISourceInformationProvider>();
+
+            var discoverer = new XunitTestFrameworkDiscoverer(assembly, sourceInfoProvider);
+
+            Assert.IsType<CollectionPerClassTestCollectionFactory>(discoverer.TestCollectionFactory);
+            Assert.Equal(XunitTestFrameworkDiscoverer.DisplayName + " [collection-per-class, non-parallel]", discoverer.TestFrameworkDisplayName);
+        }
+
+        class TestCollectionFactory_NoCompatibleConstructor : IXunitTestCollectionFactory
+        {
+            public string DisplayName
+            {
+                get { throw new NotImplementedException(); }
+            }
+
+            public ITestCollection Get(ITypeInfo testClass)
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        class TestCollectionFactory_DoesNotImplementInterface
+        {
+            public TestCollectionFactory_DoesNotImplementInterface(IAssemblyInfo assemblyInfo) { }
         }
     }
 
@@ -85,7 +171,7 @@ public class XunitTestFrameworkDiscovererTests
         {
             var sourceProvider = Substitute.For<ISourceInformationProvider>();
             sourceProvider.GetSourceInformation(null)
-                          .ReturnsForAnyArgs(Tuple.Create<string, int?>("Source File", 42));
+                          .ReturnsForAnyArgs(new SourceInformation { FileName = "Source File", LineNumber = 42 });
             var typeInfo = Reflector.Wrap(typeof(ClassWithSingleTest));
             var mockAssembly = Mocks.AssemblyInfo(types: new[] { typeInfo });
             var framework = TestableXunitTestFrameworkDiscoverer.Create(mockAssembly, sourceProvider);
@@ -96,8 +182,8 @@ public class XunitTestFrameworkDiscovererTests
                 testCase =>
                 {
                     Assert.Equal("XunitTestFrameworkDiscovererTests+ClassWithSingleTest.TestMethod", testCase.DisplayName);
-                    Assert.Equal("Source File", testCase.SourceFileName);
-                    Assert.Equal(42, testCase.SourceFileLine);
+                    Assert.Equal("Source File", testCase.SourceInformation.FileName);
+                    Assert.Equal(42, testCase.SourceInformation.LineNumber);
                 }
             );
         }
@@ -168,7 +254,7 @@ public class XunitTestFrameworkDiscovererTests
         {
             var sourceProvider = Substitute.For<ISourceInformationProvider>();
             sourceProvider.GetSourceInformation(null)
-                          .ReturnsForAnyArgs(Tuple.Create<string, int?>("Source File", 42));
+                          .ReturnsForAnyArgs(new SourceInformation { FileName = "Source File", LineNumber = 42 });
             var framework = TestableXunitTestFrameworkDiscoverer.Create(sourceProvider: sourceProvider);
             var typeInfo = Reflector.Wrap(typeof(ClassWithSingleTest));
             framework.Assembly.GetType("abc").Returns(typeInfo);
@@ -179,8 +265,8 @@ public class XunitTestFrameworkDiscovererTests
                 testCase =>
                 {
                     Assert.Equal("XunitTestFrameworkDiscovererTests+ClassWithSingleTest.TestMethod", testCase.DisplayName);
-                    Assert.Equal("Source File", testCase.SourceFileName);
-                    Assert.Equal(42, testCase.SourceFileLine);
+                    Assert.Equal("Source File", testCase.SourceInformation.FileName);
+                    Assert.Equal(42, testCase.SourceInformation.LineNumber);
                 }
             );
         }
