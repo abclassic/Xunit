@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
   <metadata>
     <id>xunit.extensions</id>
-    <version>1.9.1</version>
+    <version>1.9.2-ablcustom</version>
     <title>xUnit.net: Extensions</title>
     <authors>James Newkirk,  Brad Wilson</authors>
     <owners>James Newkirk,  Brad Wilson</owners>
@@ -15,7 +15,7 @@
     <copyright />
     <language />
     <dependencies>
-      <dependency id="xunit" version="[1.9.1]" />
+      <dependency id="xunit" version="[1.9.1,1.9.2]" />
     </dependencies>
   </metadata>
 </package>

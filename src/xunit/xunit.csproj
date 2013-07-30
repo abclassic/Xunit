@@ -162,7 +162,7 @@
 xcopy $(TargetDir)$(TargetName).* ..\..\..\..\_nuget_abl_\$(TargetName)\lib\ /F /Y
 
 :: Build the nuget package.
-nuget pack ..\..\..\..\_nuget_abl_\xunit\xunit.1.9.1.nuspec -OutputDirectory ..\..\..\..\_nuget_abl_\local_repo
+nuget pack ..\..\..\..\_nuget_abl_\xunit\xunit.1.9.2.nuspec -OutputDirectory ..\..\..\..\_nuget_abl_\local_repo
 
 </PostBuildEvent>
   </PropertyGroup>

@@ -119,6 +119,15 @@
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <PostBuildEvent>:: Update the custom Xunit Nuget package.
+xcopy $(TargetDir)$(TargetName).* ..\..\..\..\_nuget_abl_\$(TargetName)\lib\ /F /Y
+
+:: Build the nuget package.
+nuget pack ..\..\..\..\_nuget_abl_\$(TargetName)\$(TargetName).1.9.2.nuspec -OutputDirectory ..\..\..\..\_nuget_abl_\local_repo
+
+</PostBuildEvent>
+  </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">
